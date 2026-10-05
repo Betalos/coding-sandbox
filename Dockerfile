@@ -30,10 +30,12 @@ RUN npm install -g corepack opencode-ai @anthropic-ai/claude-code @caveman-ai/cl
  && corepack enable \
  && npm cache clean --force
 # Caveman companion binaries live in a read-only path; its runtime state goes to CAVEMAN_HOME (tmpfs under HOME)
-RUN CAVEMAN_HOME=/opt/caveman caveman setup --install
+RUN CAVEMAN_HOME=/opt/caveman caveman setup --install \
+ && chmod -R a+rX /opt/caveman
 
 # Unprivileged user (uid 1000); HOME is a tmpfs when the root filesystem is read-only
-RUN useradd -u 1000 -m -s /bin/bash node
+RUN useradd -u 1000 -m -s /bin/bash node \
+ && su -s /bin/sh node -c 'test -x /opt/caveman/bin/caveman-proxy'   # fails the build if the unprivileged user cannot run the Caveman binaries
 WORKDIR /app
 COPY package.json ./
 COPY src ./src
