@@ -89,6 +89,7 @@ function validate (b) {
 function agentEnv (agentName) {
   const out = { PATH: env.PATH, HOME: env.HOME, LANG: env.LANG ?? 'C.UTF-8', CI: '1' }
   for (const k of AGENTS[agentName].secrets) if (env[k]) out[k] = env[k]
+  if (env.DOCKER_HOST) out.DOCKER_HOST = env.DOCKER_HOST // the Docker daemon of the sidecar, for databases and the like
   if (agentName === 'claude' && wrapped()) {
     for (const k of Object.keys(env)) if (k.startsWith('CAVEMAN_')) out[k] = env[k]
     out.CAVEMAN_LISTEN = `127.0.0.1:${18000 + (proxyPort++ % 1000)}` // one compression proxy per job

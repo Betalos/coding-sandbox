@@ -23,7 +23,7 @@ const slow = fake('slow', 'sleep 30')
 
 Object.assign(process.env, {
   SANDBOX_TOKEN: 'secret', WORKSPACE: path.join(tmp, 'ws'), ALLOW_FILE_REPOS: '1', OPENCODE_BIN: opencode, CLAUDE_BIN: claude,
-  OPENROUTER_API_KEY: 'or-key', CLAUDE_CODE_OAUTH_TOKEN: 'oauth-tok', GIT_TOKEN: 'must-not-leak', MAX_JOBS: '1', PORT: '0', CAVEMAN_HOME: '/h/cave'
+  OPENROUTER_API_KEY: 'or-key', CLAUDE_CODE_OAUTH_TOKEN: 'oauth-tok', GIT_TOKEN: 'must-not-leak', MAX_JOBS: '1', PORT: '0', CAVEMAN_HOME: '/h/cave', DOCKER_HOST: 'tcp://dind:2375'
 })
 fs.mkdirSync(path.join(process.env.WORKSPACE, '.logs'), { recursive: true })
 const { server, cleanWorkspace } = require('../src/server')
@@ -59,6 +59,7 @@ server.listen(0, async () => {
     // independent test run + push
     assert.equal((await call('POST', '/jobs/j1/test', { cmd: 'test -f made.txt' })).body.exit_code, 0)
     assert.equal((await call('POST', '/jobs/j1/test', { cmd: 'test -f nope.txt' })).body.exit_code, 1)
+    assert.match((await call('POST', '/jobs/j1/test', { cmd: 'echo $DOCKER_HOST' })).body.output, /tcp:\/\/dind:2375/), 'DOCKER_HOST reaches the commands'
     const p = (await call('POST', '/jobs/j1/push', { message: 'add made.txt' })).body
     assert.equal(p.branch, 'huly/j1'); assert.match(p.stat, /made.txt/)
     assert.equal(sh(`git --git-dir=${remote} show huly/j1:made.txt`).trim(), 'made')
