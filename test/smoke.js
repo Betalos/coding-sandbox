@@ -18,11 +18,12 @@ sh(`git clone -q ${remote} ${seed} && cd ${seed} && git checkout -q -b main && e
 const fake = (name, body) => { const f = path.join(tmp, name); fs.writeFileSync(f, `#!/bin/sh\n${body}\n`, { mode: 0o755 }); return f }
 const opencode = fake('opencode', 'echo "args: $@"; echo made > made.txt; echo "or=$OPENROUTER_API_KEY git=$GIT_TOKEN"')
 const claude = fake('claude', 'echo "claude $@"; echo c > claude.txt; echo "oauth=$CLAUDE_CODE_OAUTH_TOKEN or=$OPENROUTER_API_KEY"')
+const caveman = fake('caveman', 'echo "caveman $@ listen=$CAVEMAN_LISTEN home=$CAVEMAN_HOME"; shift 2; exec "$CAVEMAN_FAKE_CLAUDE" "$@"')
 const slow = fake('slow', 'sleep 30')
 
 Object.assign(process.env, {
   SANDBOX_TOKEN: 'secret', WORKSPACE: path.join(tmp, 'ws'), ALLOW_FILE_REPOS: '1', OPENCODE_BIN: opencode, CLAUDE_BIN: claude,
-  OPENROUTER_API_KEY: 'or-key', CLAUDE_CODE_OAUTH_TOKEN: 'oauth-tok', GIT_TOKEN: 'must-not-leak', MAX_JOBS: '1', PORT: '0'
+  OPENROUTER_API_KEY: 'or-key', CLAUDE_CODE_OAUTH_TOKEN: 'oauth-tok', GIT_TOKEN: 'must-not-leak', MAX_JOBS: '1', PORT: '0', CAVEMAN_HOME: '/h/cave'
 })
 fs.mkdirSync(path.join(process.env.WORKSPACE, '.logs'), { recursive: true })
 const { server } = require('../src/server')
@@ -67,6 +68,15 @@ server.listen(0, async () => {
     assert.equal(j.status, 'done'); assert.match(j.log, /claude -p do it --output-format stream-json .*--model sonnet/)
     assert.match(j.log, /oauth=oauth-tok or=\n/, 'claude gets only its own secrets')
     await call('DELETE', '/jobs/j3')
+
+    // claude wrapped with caveman
+    Object.assign(process.env, { CLAUDE_WRAP: 'caveman', CAVEMAN_BIN: caveman, CAVEMAN_FAKE_CLAUDE: claude })
+    assert.equal((await call('POST', '/jobs', job('j5', { agent: 'claude' }))).status, 200)
+    j = await finish('j5')
+    assert.equal(j.status, 'done'); assert.match(j.log, /caveman wrap claude -p do it .*listen=127\.0\.0\.1:180\d\d home=\/h\/cave/)
+    assert.match(j.log, /oauth=oauth-tok/)
+    await call('DELETE', '/jobs/j5')
+    delete process.env.CLAUDE_WRAP
 
     // timeout kills the agent
     process.env.OPENCODE_BIN = slow

@@ -17,6 +17,7 @@ See `compose.example.yaml` (read-only root, dropped capabilities, one writable m
 | `ALLOWED_GIT_HOSTS` | required; comma separated hosts a job may clone from (https only) |
 | `OPENROUTER_API_KEY` | OpenCode (and any agent pointed at OpenRouter) |
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude Code with a Claude subscription (`claude setup-token`); `ANTHROPIC_API_KEY`, or `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN`, work too |
+| `CLAUDE_WRAP` | `caveman` (the image default) runs Claude Code as `caveman wrap claude` for local context compression; empty runs it plain. Each job gets its own proxy port; `CAVEMAN_*` variables are passed through |
 | `MAX_JOBS` | concurrent jobs, default `1` (more get `429`) |
 | `DEFAULT_TIMEOUT_S` / `MAX_TIMEOUT_S` | agent time limit, default 1800 / 7200 |
 | `WORKSPACE` | clone directory, default `/workspace`; wiped on start |

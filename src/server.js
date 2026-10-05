@@ -24,11 +24,14 @@ const AGENTS = {
     secrets: ['OPENROUTER_API_KEY']
   },
   claude: {
-    get bin () { return env.CLAUDE_BIN ?? 'claude' },
-    args: (prompt, model) => ['-p', prompt, '--output-format', 'stream-json', '--verbose', '--dangerously-skip-permissions', ...(model ? ['--model', model] : [])],
+    // CLAUDE_WRAP=caveman runs it as `caveman wrap claude ...` (local context compression, same auth passthrough)
+    get bin () { return wrapped() ? (env.CAVEMAN_BIN ?? 'caveman') : (env.CLAUDE_BIN ?? 'claude') },
+    args: (prompt, model) => [...(wrapped() ? ['wrap', 'claude'] : []), '-p', prompt, '--output-format', 'stream-json', '--verbose', '--dangerously-skip-permissions', ...(model ? ['--model', model] : [])],
     secrets: ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN']
   }
 }
+function wrapped () { return env.CLAUDE_WRAP === 'caveman' }
+let proxyPort = 0
 const LOG_CHUNK = 64 * 1024
 
 if (!SANDBOX_TOKEN) {
@@ -85,6 +88,10 @@ function validate (b) {
 function agentEnv (agentName) {
   const out = { PATH: env.PATH, HOME: env.HOME, LANG: env.LANG ?? 'C.UTF-8', CI: '1' }
   for (const k of AGENTS[agentName].secrets) if (env[k]) out[k] = env[k]
+  if (agentName === 'claude' && wrapped()) {
+    for (const k of Object.keys(env)) if (k.startsWith('CAVEMAN_')) out[k] = env[k]
+    out.CAVEMAN_LISTEN = `127.0.0.1:${18000 + (proxyPort++ % 1000)}` // one compression proxy per job
+  }
   return out
 }
 
