@@ -70,6 +70,14 @@ server.listen(0, async () => {
     assert.equal((await call('DELETE', '/jobs/j1')).status, 200)
     assert.ok(!fs.existsSync(path.join(process.env.WORKSPACE, 'j1')), 'workspace removed')
 
+    // from_branch: continue the branch pushed by j1 (a PR being fixed): its commit is there, new work lands on top, push is a fast-forward
+    assert.equal((await call('POST', '/jobs', job('j6', { branch: 'huly/j1', from_branch: true }))).status, 200)
+    j = await finish('j6'); assert.equal(j.status, 'done')
+    assert.equal((await call('POST', '/jobs/j6/test', { cmd: 'git log --oneline | grep -q "add made.txt"' })).body.exit_code, 0, 'previous commit is in the history')
+    await call('POST', '/jobs/j6/test', { cmd: 'echo more >> made.txt' })
+    assert.equal((await call('POST', '/jobs/j6/push', { message: 'fix round' })).body.commits, 2, 'two commits on the branch now')
+    await call('DELETE', '/jobs/j6')
+
     // claude job
     assert.equal((await call('POST', '/jobs', job('j3', { agent: 'claude', model: 'sonnet' }))).status, 200)
     j = await finish('j3')

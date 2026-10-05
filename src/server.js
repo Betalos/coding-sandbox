@@ -83,7 +83,7 @@ function validate (b) {
   if (!agent.secrets.some((s) => env[s])) throw new HttpError(503, `agent "${b.agent}" has no credentials configured (${agent.secrets.join(' or ')})`)
   const timeout = Math.min(Number(b.timeout_s ?? DEFAULT_TIMEOUT_S), MAX_TIMEOUT_S)
   if (!(timeout > 0)) throw new HttpError(400, '"timeout_s" must be positive')
-  return { id, repo, branch: b.branch, base: b.base ?? 'main', agent: b.agent, prompt: b.prompt, model: b.model, token: b.token ?? DEFAULT_GIT_TOKEN, timeout }
+  return { id, repo, branch: b.branch, base: b.base ?? 'main', agent: b.agent, prompt: b.prompt, model: b.model, token: b.token ?? DEFAULT_GIT_TOKEN, timeout, fromBranch: b.from_branch === true }
 }
 
 // the agent gets only what it needs: no git token, no n8n-facing secrets
@@ -109,7 +109,8 @@ async function runJob (job, spec) {
     job.status = 'cloning'
     say(`cloning ${spec.repo}`)
     await git(['clone', spec.repo, job.dir], { token: spec.token })
-    await git(['checkout', '-B', spec.branch, `origin/${spec.base}`], { cwd: job.dir })
+    // from_branch: continue an existing branch (a pull request being fixed) instead of starting a new one from the base
+    await git(['checkout', '-B', spec.branch, `origin/${spec.fromBranch ? spec.branch : spec.base}`], { cwd: job.dir })
     await git(['config', 'user.name', env.GIT_AUTHOR_NAME ?? 'dev-agent'], { cwd: job.dir })
     await git(['config', 'user.email', env.GIT_AUTHOR_EMAIL ?? 'dev-agent@synapia.cc'], { cwd: job.dir })
     await git(['config', 'core.excludesFile', EXCLUDES], { cwd: job.dir }) // build artifacts the test run leaves behind never get committed

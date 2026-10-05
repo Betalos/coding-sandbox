@@ -29,7 +29,7 @@ See `compose.example.yaml` (read-only root, dropped capabilities, one writable m
 
 | | |
 |---|---|
-| `POST /jobs` | `{id, repo, branch, base?="main", token, agent: "opencode"\|"claude", prompt, model?, timeout_s?}` clones, branches from `base`, runs the agent headless. `202`-style: returns at once, poll the job |
+| `POST /jobs` | `{id, repo, branch, base?="main", from_branch?, token, agent: "opencode"\|"claude", prompt, model?, timeout_s?}` clones, branches from `base` (or continues the existing `branch` with `from_branch: true`, e.g. to fix a pull request), runs the agent headless. `202`-style: returns at once, poll the job |
 | `GET /jobs/:id?since=N` | `{status: cloning\|running\|done\|failed\|timeout, exit_code, log, next}`; pass `next` as `since` to read only new output |
 | `POST /jobs/:id/test` | `{cmd, timeout_s?}` runs `cmd` in the clone, returns `{exit_code, output}` (output tail). `cmd: "auto"` runs the project's own test command (npm test, make test, pytest/unittest); exit 127 if none is found |
 | `POST /jobs/:id/push` | `{message?, token?}` commits what is left, pushes `HEAD` to `branch`; returns `{branch, sha, commits, stat}` |
