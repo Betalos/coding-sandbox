@@ -2,8 +2,8 @@ FROM node:current-bookworm
 RUN apt-get update \
  && apt-get install -y --no-install-recommends git ca-certificates openssh-client ripgrep \
  && rm -rf /var/lib/apt/lists/* \
+ && npm install -g corepack opencode-ai @anthropic-ai/claude-code @caveman-ai/cli \
  && corepack enable \
- && npm install -g opencode-ai @anthropic-ai/claude-code @caveman-ai/cli \
  && npm cache clean --force
 # Caveman companion binaries live in a read-only path; its runtime state goes to CAVEMAN_HOME (tmpfs under HOME)
 RUN CAVEMAN_HOME=/opt/caveman caveman setup --install
