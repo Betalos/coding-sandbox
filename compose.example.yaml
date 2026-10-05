@@ -1,0 +1,26 @@
+# Hardened run of the image (TrueNAS custom app or plain Docker). One writable mount, own network, no extra privileges.
+services:
+  sandbox:
+    image: ghcr.io/betalos/coding-sandbox:latest
+    restart: unless-stopped
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 8g
+    cpus: 4
+    pids_limit: 1024
+    tmpfs:
+      - /tmp
+      - /home/node:uid=1000,gid=1000
+    volumes:
+      - /mnt/Data/sandbox/workspace:/workspace          # the only writable mount
+    environment:
+      SANDBOX_TOKEN: change-me                          # n8n sends it as Bearer token
+      ALLOWED_GIT_HOSTS: forgejo.synapia.cc
+      OPENROUTER_API_KEY: sk-or-...                     # OpenCode; dedicated key with a credit limit
+      CLAUDE_CODE_OAUTH_TOKEN: sk-ant-oat...            # Claude Code; from `claude setup-token`
+      MAX_JOBS: "1"
+    networks: [sandbox]
+networks:
+  sandbox: {}

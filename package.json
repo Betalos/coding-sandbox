@@ -1,0 +1,13 @@
+{
+  "name": "coding-sandbox",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Hardened job runner for coding agents (OpenCode, Claude Code): clone, run the agent headless, test, push",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "smoke": "node test/smoke.js"
+  },
+  "engines": { "node": ">=22" },
+  "license": "MIT"
+}
