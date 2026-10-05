@@ -1,0 +1,16 @@
+# default ignore list for every clone (core.excludesFile); a repo's own .gitignore still applies
+__pycache__/
+*.pyc
+node_modules/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+coverage/
+.coverage
+dist/
+build/
+target/
+.DS_Store
+*.log

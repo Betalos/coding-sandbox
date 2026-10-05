@@ -32,6 +32,7 @@ const AGENTS = {
 }
 function wrapped () { return env.CLAUDE_WRAP === 'caveman' }
 let proxyPort = 0
+const EXCLUDES = path.join(__dirname, 'gitignore')
 const LOG_CHUNK = 64 * 1024
 
 if (!SANDBOX_TOKEN) {
@@ -109,6 +110,7 @@ async function runJob (job, spec) {
     await git(['checkout', '-B', spec.branch, `origin/${spec.base}`], { cwd: job.dir })
     await git(['config', 'user.name', env.GIT_AUTHOR_NAME ?? 'dev-agent'], { cwd: job.dir })
     await git(['config', 'user.email', env.GIT_AUTHOR_EMAIL ?? 'dev-agent@synapia.cc'], { cwd: job.dir })
+    await git(['config', 'core.excludesFile', EXCLUDES], { cwd: job.dir }) // build artifacts the test run leaves behind never get committed
     job.status = 'running'
     say(`running ${spec.agent}`)
     const agent = AGENTS[spec.agent]

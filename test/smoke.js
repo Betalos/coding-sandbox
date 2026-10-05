@@ -16,7 +16,7 @@ sh(`git clone -q ${remote} ${seed} && cd ${seed} && git checkout -q -b main && e
 
 // fake agents: write a file, print the secrets it can see (must be none of the git token)
 const fake = (name, body) => { const f = path.join(tmp, name); fs.writeFileSync(f, `#!/bin/sh\n${body}\n`, { mode: 0o755 }); return f }
-const opencode = fake('opencode', 'echo "args: $@"; echo made > made.txt; echo "or=$OPENROUTER_API_KEY git=$GIT_TOKEN"')
+const opencode = fake('opencode', 'echo "args: $@"; echo made > made.txt; mkdir -p __pycache__; echo x > __pycache__/a.pyc; echo "or=$OPENROUTER_API_KEY git=$GIT_TOKEN"')
 const claude = fake('claude', 'echo "claude $@"; echo c > claude.txt; echo "oauth=$CLAUDE_CODE_OAUTH_TOKEN or=$OPENROUTER_API_KEY"')
 const caveman = fake('caveman', 'echo "caveman $@ listen=$CAVEMAN_LISTEN home=$CAVEMAN_HOME"; shift 2; exec "$CAVEMAN_FAKE_CLAUDE" "$@"')
 const slow = fake('slow', 'sleep 30')
@@ -62,6 +62,7 @@ server.listen(0, async () => {
     const p = (await call('POST', '/jobs/j1/push', { message: 'add made.txt' })).body
     assert.equal(p.branch, 'huly/j1'); assert.match(p.stat, /made.txt/)
     assert.equal(sh(`git --git-dir=${remote} show huly/j1:made.txt`).trim(), 'made')
+    assert.ok(!/pycache/.test(sh(`git --git-dir=${remote} ls-tree -r --name-only huly/j1`)), 'build artifacts are not pushed')
     assert.equal((await call('POST', '/jobs/j1/push', {})).body.sha, p.sha, 're-push is a no-op')
     assert.match((await call('GET', '/jobs/j1/diff')).body.diff, /made.txt/)
     assert.equal((await call('DELETE', '/jobs/j1')).status, 200)
