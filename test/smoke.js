@@ -26,7 +26,12 @@ Object.assign(process.env, {
   OPENROUTER_API_KEY: 'or-key', CLAUDE_CODE_OAUTH_TOKEN: 'oauth-tok', GIT_TOKEN: 'must-not-leak', MAX_JOBS: '1', PORT: '0', CAVEMAN_HOME: '/h/cave'
 })
 fs.mkdirSync(path.join(process.env.WORKSPACE, '.logs'), { recursive: true })
-const { server } = require('../src/server')
+const { server, cleanWorkspace } = require('../src/server')
+
+// startup cleanup keeps the workspace directory itself (it is a mount point in production) and removes stale clones
+fs.mkdirSync(path.join(process.env.WORKSPACE, 'stale', 'sub'), { recursive: true })
+cleanWorkspace()
+assert.deepEqual(fs.readdirSync(process.env.WORKSPACE), ['.logs'])
 
 const call = async (method, p, body, token = 'secret') => {
   const r = await fetch(`http://127.0.0.1:${server.address().port}${p}`, { method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })

@@ -261,10 +261,18 @@ const server = http.createServer(async (req, res) => {
   }
 })
 
-if (require.main === module) {
-  // job state is in memory only: after a restart the old clones are orphans
-  fs.rmSync(WORKSPACE, { recursive: true, force: true, maxRetries: 2 })
+// job state is in memory only: after a restart the old clones are orphans. WORKSPACE itself is usually a mount
+// point and cannot be removed, so only its contents go; a failure here must never stop the service from starting.
+function cleanWorkspace () {
+  fs.mkdirSync(WORKSPACE, { recursive: true })
+  for (const entry of fs.readdirSync(WORKSPACE)) {
+    try { fs.rmSync(path.join(WORKSPACE, entry), { recursive: true, force: true }) } catch (e) { console.error(`cannot remove ${entry}: ${e.message}`) }
+  }
   fs.mkdirSync(path.join(WORKSPACE, '.logs'), { recursive: true })
+}
+
+if (require.main === module) {
+  cleanWorkspace()
   server.listen(PORT, () => console.log(`coding-sandbox listening on :${PORT}`))
 }
-module.exports = { server }
+module.exports = { server, cleanWorkspace }

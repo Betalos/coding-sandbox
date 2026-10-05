@@ -7,7 +7,7 @@ services:
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
-    mem_limit: 8g
+    mem_limit: 16g
     cpus: 4
     pids_limit: 1024
     tmpfs:
