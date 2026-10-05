@@ -59,6 +59,7 @@ server.listen(0, async () => {
     // independent test run + push
     assert.equal((await call('POST', '/jobs/j1/test', { cmd: 'test -f made.txt' })).body.exit_code, 0)
     assert.equal((await call('POST', '/jobs/j1/test', { cmd: 'test -f nope.txt' })).body.exit_code, 1)
+    assert.equal((await call('POST', '/jobs/j1/test', { cmd: 'auto' })).body.exit_code, 127, 'auto: no tests detected is not a pass')
     assert.match((await call('POST', '/jobs/j1/test', { cmd: 'echo $DOCKER_HOST' })).body.output, /tcp:\/\/dind:2375/), 'DOCKER_HOST reaches the commands'
     const p = (await call('POST', '/jobs/j1/push', { message: 'add made.txt' })).body
     assert.equal(p.branch, 'huly/j1'); assert.match(p.stat, /made.txt/)

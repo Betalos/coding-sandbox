@@ -18,6 +18,7 @@ See `compose.example.yaml` (read-only root, dropped capabilities, one writable m
 | `OPENROUTER_API_KEY` | OpenCode (and any agent pointed at OpenRouter) |
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude Code with a Claude subscription (`claude setup-token`); `ANTHROPIC_API_KEY`, or `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN`, work too |
 | `CLAUDE_WRAP` | `caveman` (the image default) runs Claude Code as `caveman wrap claude` for local context compression; empty runs it plain. Each job gets its own proxy port; `CAVEMAN_*` variables are passed through |
+| `GIT_TOKEN` | default git token for jobs that pass none (a Forgejo PAT); used by git only, never given to the agent |
 | `MAX_JOBS` | concurrent jobs, default `1` (more get `429`) |
 | `DEFAULT_TIMEOUT_S` / `MAX_TIMEOUT_S` | agent time limit, default 1800 / 7200 |
 | `WORKSPACE` | clone directory, default `/workspace`; wiped on start |
@@ -30,7 +31,7 @@ See `compose.example.yaml` (read-only root, dropped capabilities, one writable m
 |---|---|
 | `POST /jobs` | `{id, repo, branch, base?="main", token, agent: "opencode"\|"claude", prompt, model?, timeout_s?}` clones, branches from `base`, runs the agent headless. `202`-style: returns at once, poll the job |
 | `GET /jobs/:id?since=N` | `{status: cloning\|running\|done\|failed\|timeout, exit_code, log, next}`; pass `next` as `since` to read only new output |
-| `POST /jobs/:id/test` | `{cmd, timeout_s?}` runs `cmd` in the clone, returns `{exit_code, output}` (output tail) |
+| `POST /jobs/:id/test` | `{cmd, timeout_s?}` runs `cmd` in the clone, returns `{exit_code, output}` (output tail). `cmd: "auto"` runs the project's own test command (npm test, make test, pytest/unittest); exit 127 if none is found |
 | `POST /jobs/:id/push` | `{message?, token?}` commits what is left, pushes `HEAD` to `branch`; returns `{branch, sha, commits, stat}` |
 | `GET /jobs/:id/diff` | diff against the base branch |
 | `DELETE /jobs/:id` | stops the agent and deletes the clone |

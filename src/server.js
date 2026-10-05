@@ -17,6 +17,7 @@ const MAX_TIMEOUT_S = Number(env.MAX_TIMEOUT_S ?? 7200)
 const ALLOWED_GIT_HOSTS = (env.ALLOWED_GIT_HOSTS ?? '').split(',').map((h) => h.trim()).filter(Boolean)
 const ALLOW_FILE_REPOS = env.ALLOW_FILE_REPOS === '1' // tests only
 const SANDBOX_TOKEN = env.SANDBOX_TOKEN
+const DEFAULT_GIT_TOKEN = env.GIT_TOKEN // used when a job passes no token; never given to the agent
 const AGENTS = {
   opencode: {
     get bin () { return env.OPENCODE_BIN ?? 'opencode' },
@@ -82,7 +83,7 @@ function validate (b) {
   if (!agent.secrets.some((s) => env[s])) throw new HttpError(503, `agent "${b.agent}" has no credentials configured (${agent.secrets.join(' or ')})`)
   const timeout = Math.min(Number(b.timeout_s ?? DEFAULT_TIMEOUT_S), MAX_TIMEOUT_S)
   if (!(timeout > 0)) throw new HttpError(400, '"timeout_s" must be positive')
-  return { id, repo, branch: b.branch, base: b.base ?? 'main', agent: b.agent, prompt: b.prompt, model: b.model, token: b.token, timeout }
+  return { id, repo, branch: b.branch, base: b.base ?? 'main', agent: b.agent, prompt: b.prompt, model: b.model, token: b.token ?? DEFAULT_GIT_TOKEN, timeout }
 }
 
 // the agent gets only what it needs: no git token, no n8n-facing secrets
@@ -174,9 +175,18 @@ function status (job, since) {
   return { id, status: s, exit_code: exitCode, branch, agent, started, ended, ...readLog(job, since) }
 }
 
+// cmd "auto": the project's own test command. Exit 127 when none is found, so a missing test suite is never mistaken for a pass.
+const AUTO_TEST = `if [ -f package.json ] && node -e "process.exit(require('./package.json').scripts?.test ? 0 : 1)"; then
+  { [ -d node_modules ] || npm ci || npm install; } && npm test
+elif [ -f Makefile ] && grep -q '^test:' Makefile; then make test
+elif [ -f pytest.ini ] || [ -f pyproject.toml ] || [ -f setup.py ] || [ -f requirements.txt ] || [ -n "$(find . -maxdepth 3 -not -path './node_modules/*' \\( -name 'test_*.py' -o -name '*_test.py' \\) -print -quit)" ]; then
+  if python3 -c 'import pytest' 2>/dev/null; then python3 -m pytest -q; else python3 -m unittest discover; fi
+else echo 'no test command detected' >&2; exit 127; fi`
+
 // n8n runs the tests itself; the agent's own claim that they pass is not trusted
 function runTests (job, { cmd, timeout_s: t = 900 }) {
   if (!cmd || typeof cmd !== 'string') throw new HttpError(400, '"cmd" is required')
+  if (cmd === 'auto') cmd = AUTO_TEST
   if (job.status === 'running' || job.status === 'cloning') throw new HttpError(409, 'job is still running')
   return new Promise((resolve) => {
     const proc = spawn('sh', ['-c', cmd], { cwd: job.dir, env: agentEnv(job.agent), detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
