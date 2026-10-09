@@ -34,7 +34,7 @@ echo '{"is_error":false,"result":"{}","structured_output":{"chars":'\${#in}'},"u
 
 Object.assign(process.env, {
   SANDBOX_TOKEN: 'secret', WORKSPACE: path.join(tmp, 'ws'), ALLOW_FILE_REPOS: '1', OPENCODE_BIN: opencode, CLAUDE_BIN: claude,
-  OPENROUTER_API_KEY: 'or-key', CLAUDE_CODE_OAUTH_TOKEN: 'oauth-tok', GIT_TOKEN: 'must-not-leak', MAX_JOBS: '2', MAX_LLM: '1', PORT: '0', CAVEMAN_HOME: '/h/cave', DOCKER_HOST: 'tcp://dind:2375'
+  OPENROUTER_API_KEY: 'or-key', CLAUDE_CODE_OAUTH_TOKEN: 'oauth-tok', GIT_TOKEN: 'must-not-leak', CLAUDE_WRAP: '', MAX_JOBS: '2', MAX_LLM: '1', PORT: '0', CAVEMAN_HOME: '/h/cave', DOCKER_HOST: 'tcp://dind:2375'
 })
 fs.mkdirSync(path.join(process.env.WORKSPACE, '.logs'), { recursive: true })
 const { server, cleanWorkspace } = require('../src/server')

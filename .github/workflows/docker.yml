@@ -14,21 +14,27 @@ jobs:
   image:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - run: npm run smoke
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
 
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      # the smoke test runs inside the image itself (Oracle Linux 10, the production OS), not on the runner
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: sandbox:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - run: docker run --rm -v "$PWD/test:/app/test:ro" sandbox:test node test/smoke.js
+
+      - uses: docker/login-action@v4
         if: github.event_name != 'pull_request'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
@@ -36,7 +42,7 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           push: ${{ github.event_name != 'pull_request' }}

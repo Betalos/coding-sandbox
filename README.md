@@ -42,5 +42,5 @@ See `compose.example.yaml` (read-only root, dropped capabilities, one writable m
 
 ## Releases
 
-Pushes to `main` publish `ghcr.io/<owner>/coding-sandbox:latest` and `:sha-…`; tags `v1.2.3` publish `1.2.3` and `1.2`.
+The smoke test runs inside the built image (Oracle Linux 10) before anything is pushed. Pushes to `main` publish `ghcr.io/<owner>/coding-sandbox:latest` and `:sha-…`; tags `v1.2.3` publish `1.2.3` and `1.2`.
 The image is Oracle Linux 10 with the newest Node.js LTS (resolved at build time), git, a C/C++ toolchain, python3 and the Docker client (CLI, Compose, Buildx; no daemon, set `DOCKER_HOST`). Docker/Compose/Buildx versions are pinned in the Dockerfile; rebuild monthly and bump them.
