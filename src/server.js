@@ -12,6 +12,7 @@ const env = process.env
 const PORT = Number(env.PORT ?? 8080)
 const WORKSPACE = env.WORKSPACE ?? '/workspace'
 const MAX_JOBS = Number(env.MAX_JOBS ?? 1)
+const MAX_LLM = Number(env.MAX_LLM ?? 4) // concurrent POST /llm calls; own pool, so a coding job never blocks them
 const DEFAULT_TIMEOUT_S = Number(env.DEFAULT_TIMEOUT_S ?? 1800)
 const MAX_TIMEOUT_S = Number(env.MAX_TIMEOUT_S ?? 7200)
 const ALLOWED_GIT_HOSTS = (env.ALLOWED_GIT_HOSTS ?? '').split(',').map((h) => h.trim()).filter(Boolean)
@@ -54,6 +55,9 @@ class HttpError extends Error {
 
 const jobs = new Map() // id -> { id, dir, logFile, status, exitCode, branch, base, token, proc, started, ended, agent }
 
+const MIRRORS = path.join(WORKSPACE, '.mirrors') // one bare mirror per repository, kept across restarts, refreshed by every job
+const mirrorLocks = new Map() // mirror dir -> promise of the last refresh (jobs on the same repo wait for each other, not for other repos)
+
 const jobDir = (id) => path.join(WORKSPACE, id)
 const logFile = (id) => path.join(WORKSPACE, '.logs', `${id}.log`)
 
@@ -66,6 +70,26 @@ function git (args, { cwd, token, input } = {}) {
     })
     if (input) child.stdin.end(input)
   })
+}
+
+// A job clones from the local mirror (full copy, --no-hardlinks: an agent can never touch another job's objects), not from the network.
+// The mirror is cloned once and refreshed (fetch --prune) at the start of every job, so the base and the branch being fixed are current.
+function refreshMirror (repo, token) {
+  const dir = path.join(MIRRORS, `${crypto.createHash('sha1').update(repo).digest('hex')}.git`)
+  const run = async () => {
+    if (fs.existsSync(dir)) {
+      await git(['remote', 'update', '--prune'], { cwd: dir, token })
+    } else {
+      fs.mkdirSync(MIRRORS, { recursive: true })
+      fs.rmSync(`${dir}.tmp`, { recursive: true, force: true })
+      await git(['clone', '--mirror', repo, `${dir}.tmp`], { token })
+      fs.renameSync(`${dir}.tmp`, dir) // a half-finished first clone is never mistaken for a mirror
+    }
+    return dir
+  }
+  const next = (mirrorLocks.get(dir) ?? Promise.resolve()).catch(() => {}).then(run)
+  mirrorLocks.set(dir, next)
+  return next
 }
 
 function validate (b) {
@@ -87,8 +111,9 @@ function validate (b) {
 }
 
 // the agent gets only what it needs: no git token, no n8n-facing secrets
-function agentEnv (agentName) {
+function agentEnv (agentName, jobId) {
   const out = { PATH: env.PATH, HOME: env.HOME, LANG: env.LANG ?? 'C.UTF-8', CI: '1' }
+  if (jobId) out.COMPOSE_PROJECT_NAME = jobId.toLowerCase().replace(/[^a-z0-9_-]/g, '-') // parallel jobs share one Docker daemon: their compose stacks must not collide
   for (const k of AGENTS[agentName].secrets) if (env[k]) out[k] = env[k]
   if (env.DOCKER_HOST) out.DOCKER_HOST = env.DOCKER_HOST // the Docker daemon of the sidecar, for databases and the like
   if (agentName === 'claude' && wrapped()) {
@@ -107,8 +132,11 @@ async function runJob (job, spec) {
   const say = (m) => log.write(`[sandbox] ${m}\n`)
   try {
     job.status = 'cloning'
-    say(`cloning ${spec.repo}`)
-    await git(['clone', spec.repo, job.dir], { token: spec.token })
+    say(`updating mirror of ${spec.repo}`)
+    const mirror = await refreshMirror(spec.repo, spec.token)
+    say('cloning from mirror')
+    await git(['clone', '--no-hardlinks', mirror, job.dir])
+    await git(['remote', 'set-url', 'origin', spec.repo], { cwd: job.dir }) // pushes go to the real repository
     // from_branch: continue an existing branch (a pull request being fixed) instead of starting a new one from the base
     await git(['checkout', '-B', spec.branch, `origin/${spec.fromBranch ? spec.branch : spec.base}`], { cwd: job.dir })
     await git(['config', 'user.name', env.GIT_AUTHOR_NAME ?? 'dev-agent'], { cwd: job.dir })
@@ -117,7 +145,7 @@ async function runJob (job, spec) {
     job.status = 'running'
     say(`running ${spec.agent}`)
     const agent = AGENTS[spec.agent]
-    const proc = spawn(agent.bin, agent.args(spec.prompt, spec.model), { cwd: job.dir, env: agentEnv(spec.agent), detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    const proc = spawn(agent.bin, agent.args(spec.prompt, spec.model), { cwd: job.dir, env: agentEnv(spec.agent, spec.id), detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
     job.proc = proc
     proc.stdout.pipe(log, { end: false })
     proc.stderr.pipe(log, { end: false })
@@ -190,7 +218,7 @@ function runTests (job, { cmd, timeout_s: t = 900 }) {
   if (cmd === 'auto') cmd = AUTO_TEST
   if (job.status === 'running' || job.status === 'cloning') throw new HttpError(409, 'job is still running')
   return new Promise((resolve) => {
-    const proc = spawn('sh', ['-c', cmd], { cwd: job.dir, env: agentEnv(job.agent), detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    const proc = spawn('sh', ['-c', cmd], { cwd: job.dir, env: agentEnv(job.agent, job.id), detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
     let out = ''
     const add = (d) => { out = (out + d).slice(-20000) }
     proc.stdout.on('data', add)
@@ -228,7 +256,67 @@ function remove (job) {
   return { deleted: job.id }
 }
 
+// POST /llm: one prompt in, schema-validated JSON out, through Claude Code (a subscription login works) with no tools and no repository,
+// so n8n can use it like an LLM node. The prompt goes in on stdin (too long for an argument); the cwd is an empty temp dir (no CLAUDE.md to pick up).
+let llmRunning = 0
+const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
+
+async function llm (b) {
+  if (typeof b.user !== 'string' || !b.user) throw new HttpError(400, '"user" is required')
+  if (!b.schema || typeof b.schema !== 'object') throw new HttpError(400, '"schema" (a JSON schema object) is required')
+  if (b.system != null && typeof b.system !== 'string') throw new HttpError(400, '"system" must be a string')
+  const model = b.model ?? 'sonnet'
+  if (!/^[A-Za-z0-9._:[\]-]{1,80}$/.test(model)) throw new HttpError(400, '"model" is not a valid model alias or id')
+  if (b.effort != null && !EFFORTS.includes(b.effort)) throw new HttpError(400, `"effort" must be one of: ${EFFORTS.join(', ')}`)
+  const timeout = Math.min(Number(b.timeout_s ?? 300), MAX_TIMEOUT_S)
+  if (!(timeout > 0)) throw new HttpError(400, '"timeout_s" must be positive')
+  if (!AGENTS.claude.secrets.some((s) => env[s])) throw new HttpError(503, `claude has no credentials configured (${AGENTS.claude.secrets.join(' or ')})`)
+  if (llmRunning >= MAX_LLM) throw new HttpError(429, `busy: ${MAX_LLM} llm call(s) already running`)
+  llmRunning++
+  const dir = fs.mkdtempSync(path.join(WORKSPACE, '.llm-'))
+  const started = Date.now()
+  try {
+    const args = ['-p', '--output-format', 'json', '--json-schema', JSON.stringify(b.schema), '--tools', '', '--no-session-persistence', '--model', model,
+      ...(b.system ? ['--system-prompt', b.system] : []), ...(b.effort ? ['--effort', b.effort] : [])]
+    const out = await new Promise((resolve, reject) => {
+      const e = { PATH: env.PATH, HOME: env.HOME, LANG: env.LANG ?? 'C.UTF-8', CI: '1' }
+      for (const k of AGENTS.claude.secrets) if (env[k]) e[k] = env[k]
+      const proc = spawn(env.CLAUDE_BIN ?? 'claude', args, { cwd: dir, env: e, detached: true, stdio: ['pipe', 'pipe', 'pipe'] })
+      let stdout = ''; let stderr = ''; let timedOut = false
+      proc.stdout.on('data', (d) => { stdout = (stdout + d).slice(0, 8 * 1024 * 1024) })
+      proc.stderr.on('data', (d) => { stderr = (stderr + d).slice(-2000) })
+      proc.stdin.on('error', () => {}) // the process may exit before reading everything
+      proc.stdin.end(b.user)
+      const timer = setTimeout(() => { timedOut = true; killTree(proc) }, timeout * 1000)
+      proc.on('error', (err) => { clearTimeout(timer); reject(new HttpError(502, `cannot start claude: ${err.message}`)) })
+      proc.on('close', (code) => {
+        clearTimeout(timer)
+        if (timedOut) return reject(new HttpError(504, `claude did not answer within ${timeout}s`))
+        if (code !== 0) return reject(new HttpError(502, `claude exited ${code}: ${(stderr || stdout).trim().slice(-400)}`))
+        resolve(stdout)
+      })
+    })
+    let r
+    try { r = JSON.parse(out) } catch { throw new HttpError(502, `claude returned no JSON: ${out.slice(0, 200)}`) }
+    if (r.is_error || r.structured_output == null) throw new HttpError(502, `claude gave no structured output: ${String(r.result ?? '').slice(0, 300)}`)
+    const u = r.usage ?? {}
+    return {
+      data: r.structured_output,
+      text: r.result,
+      model: Object.keys(r.modelUsage ?? {})[0] ?? model,
+      usage: { prompt_tokens: (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0), completion_tokens: u.output_tokens ?? 0, cached_tokens: u.cache_read_input_tokens ?? 0 },
+      cost_usd: r.total_cost_usd ?? null, // list-price equivalent; a subscription is not billed per token
+      turns: r.num_turns ?? null,
+      seconds: Math.round((Date.now() - started) / 100) / 10
+    }
+  } finally {
+    llmRunning--
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+}
+
 const routes = [
+  ['POST', /^\/llm$/, (_p, _q, b) => llm(b)],
   ['GET', /^\/jobs$/, () => [...jobs.values()].map((j) => ({ id: j.id, status: j.status, branch: j.branch, agent: j.agent, started: j.started, ended: j.ended }))],
   ['POST', /^\/jobs$/, (_p, _q, b) => startJob(b)],
   ['GET', /^\/jobs\/([^/]+)$/, ([id], q) => status(getJob(id), q.since)],
@@ -280,6 +368,7 @@ const server = http.createServer(async (req, res) => {
 function cleanWorkspace () {
   fs.mkdirSync(WORKSPACE, { recursive: true })
   for (const entry of fs.readdirSync(WORKSPACE)) {
+    if (entry === '.mirrors') continue
     try { fs.rmSync(path.join(WORKSPACE, entry), { recursive: true, force: true }) } catch (e) { console.error(`cannot remove ${entry}: ${e.message}`) }
   }
   fs.mkdirSync(path.join(WORKSPACE, '.logs'), { recursive: true })
